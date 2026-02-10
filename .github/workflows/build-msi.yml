@@ -1,4 +1,5 @@
 name: Build MSI Installer
+# Auto-synced from Lovable
 
 on:
   workflow_dispatch:
@@ -39,6 +40,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -53,16 +55,28 @@ jobs:
           SAFE_CLIENT_NAME=$(echo "${{ inputs.client_name }}" | sed 's/[^a-zA-Z0-9]/_/g')
           PRODUCT_CODE=$(echo -n "${{ inputs.client_id }}" | md5sum | cut -c1-32 | sed 's/\(..\)/\1/g' | awk '{print toupper($0)}' | sed 's/^\(........\)\(....\)\(....\)\(....\)\(............\)$/{\1-\2-\3-\4-\5}/')
           UPGRADE_CODE="{12345678-1234-1234-1234-123456789ABC}"
+          
           cat > /tmp/RMMAgent.wxs << 'WXSEOF'
           <?xml version='1.0' encoding='utf-8'?>
           <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
-            <Product Id='PRODUCT_CODE_PLACEHOLDER' Name='IO RMM Agent - CLIENT_NAME_PLACEHOLDER' Language='1046' Version='3.1.0' Manufacturer='IO Group Tecnologia' UpgradeCode='UPGRADE_CODE_PLACEHOLDER'>
-              <Package InstallerVersion='500' Compressed='yes' InstallScope='perMachine' Description='Agente RMM IO Group para CLIENT_NAME_PLACEHOLDER' Manufacturer='IO Group Tecnologia' />
+            <Product Id='PRODUCT_CODE_PLACEHOLDER' 
+                     Name='IO RMM Agent - CLIENT_NAME_PLACEHOLDER' 
+                     Language='1046' 
+                     Version='3.1.0' 
+                     Manufacturer='IO Group Tecnologia'
+                     UpgradeCode='UPGRADE_CODE_PLACEHOLDER'>
+              
+              <Package InstallerVersion='500' Compressed='yes' InstallScope='perMachine' 
+                       Description='Agente RMM IO Group para CLIENT_NAME_PLACEHOLDER'
+                       Manufacturer='IO Group Tecnologia' />
+              
               <MajorUpgrade DowngradeErrorMessage='Uma versão mais recente já está instalada.' />
               <MediaTemplate EmbedCab='yes' />
+              
               <Feature Id='MainFeature' Title='RMM Agent' Level='1'>
                 <ComponentGroupRef Id='ProductComponents' />
               </Feature>
+              
               <Directory Id='TARGETDIR' Name='SourceDir'>
                 <Directory Id='ProgramFilesFolder'>
                   <Directory Id='INSTALLFOLDER' Name='IORMMAgent'>
@@ -71,6 +85,7 @@ jobs:
                   </Directory>
                 </Directory>
               </Directory>
+              
               <ComponentGroup Id='ProductComponents' Directory='INSTALLFOLDER'>
                 <Component Id='InstallScript' Guid='*'>
                   <File Id='InstallPs1' Source='Install-IOAgent.ps1' KeyPath='yes' />
@@ -82,13 +97,22 @@ jobs:
                   <File Id='AgentConfig' Source='agent-config.json' KeyPath='yes' />
                 </Component>
               </ComponentGroup>
-              <CustomAction Id='RunInstaller' Directory='INSTALLFOLDER' ExeCommand='powershell.exe -ExecutionPolicy Bypass -File "[INSTALLFOLDER]Install-IOAgent.ps1" -Silent' Execute='deferred' Impersonate='no' Return='check' />
+              
+              <CustomAction Id='RunInstaller' 
+                            Directory='INSTALLFOLDER'
+                            ExeCommand='powershell.exe -ExecutionPolicy Bypass -File "[INSTALLFOLDER]Install-IOAgent.ps1" -Silent'
+                            Execute='deferred'
+                            Impersonate='no'
+                            Return='check' />
+              
               <InstallExecuteSequence>
                 <Custom Action='RunInstaller' After='InstallFiles'>NOT Installed</Custom>
               </InstallExecuteSequence>
+              
             </Product>
           </Wix>
           WXSEOF
+          
           sed -i "s/PRODUCT_CODE_PLACEHOLDER/$PRODUCT_CODE/g" /tmp/RMMAgent.wxs
           sed -i "s/UPGRADE_CODE_PLACEHOLDER/$UPGRADE_CODE/g" /tmp/RMMAgent.wxs
           sed -i "s/CLIENT_NAME_PLACEHOLDER/$SAFE_CLIENT_NAME/g" /tmp/RMMAgent.wxs
@@ -116,10 +140,12 @@ jobs:
           }
           EOF
 
-      - name: Copy agent scripts
+      - name: Download agent scripts from Lovable Cloud
         run: |
-          cp public/agent/Install-IOAgent.ps1 /tmp/Install-IOAgent.ps1
-          cp public/agent/RMMAgent.ps1 /tmp/RMMAgent.ps1
+          curl -sfL "${{ inputs.origin }}/agent/Install-IOAgent.ps1" -o /tmp/Install-IOAgent.ps1
+          curl -sfL "${{ inputs.origin }}/agent/RMMAgent.ps1" -o /tmp/RMMAgent.ps1
+          echo "Scripts downloaded from ${{ inputs.origin }}:"
+          ls -la /tmp/*.ps1
 
       - name: Build MSI with wixl
         run: |
@@ -133,13 +159,16 @@ jobs:
           SAFE_CLIENT_NAME=$(echo "${{ inputs.client_name }}" | sed 's/[^a-zA-Z0-9]/_/g')
           MSI_FILE="/tmp/RMMAgentSetup_${SAFE_CLIENT_NAME}.msi"
           STORAGE_PATH="clients/${{ inputs.client_id }}/RMMAgentSetup_${SAFE_CLIENT_NAME}.msi"
+          
           curl -X POST \
             "${SUPABASE_URL}/storage/v1/object/rmm-installers/${STORAGE_PATH}" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Content-Type: application/octet-stream" \
             -H "x-upsert: true" \
             --data-binary "@${MSI_FILE}"
+          
           FILE_SIZE=$(stat -c%s "${MSI_FILE}")
+          
           curl -X POST \
             "${SUPABASE_URL}/rest/v1/agent_installers" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
@@ -153,7 +182,9 @@ jobs:
               \"file_size\": ${FILE_SIZE},
               \"version\": \"3.1.0\"
             }"
+          
           echo "✅ MSI uploaded successfully!"
+          echo "Storage path: ${STORAGE_PATH}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
